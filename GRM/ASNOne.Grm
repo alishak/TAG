@@ -1,0 +1,842 @@
+%  BSD 3-Clause License
+% 
+%  Copyright (c) 2017, Ali ElShakankiry
+%  All rights reserved.
+%
+%  Redistribution and use in source and binary forms, with or without
+%  modification, are permitted provided that the following conditions are met:
+%
+%  * Redistributions of source code must retain the above copyright notice, this
+%    list of conditions and the following disclaimer.
+%
+%  * Redistributions in binary form must reproduce the above copyright notice,
+%    this list of conditions and the following disclaimer in the documentation
+%    and/or other materials provided with the distribution.
+%
+%  * Neither the name of the copyright holder nor the names of its
+%    contributors may be used to endorse or promote products derived from
+%    this software without specific prior written permission.
+%
+%  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+%  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+%  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+%  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+%  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+%  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+%  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+%  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+%  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+%  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+% TXL 1988/1990 hybrid of the Abstract Syntax Notation One (ASN.1) Grammar:1990.
+% Sylvain Marquis, Royal Military College of Canada 2004.
+% References: [stal96] figure b.2 p.431 BNF grammar
+%	      [dub00] O. Dubuison ASN.1 Communications Between Heterogenous Systems MK 2000
+%Modifications:
+%29 Mar 04	BIT STRING type is corrected to allow size constraint expressions on both type of definitions
+%01 Apr 04	constr_reference_term is added a notation which allows referencing of variables for sets and sequences
+%26 Apr 04	The current version of the grammar is snapshotted.  Recent advances in SCL will require modification at the level of the grammar.
+%3 May 04 	Modified the ASN.1 accepted tokens in a set, for referencing purpose.  The use of components of
+%		implies the use of the labels of the inherited constructed type.  i
+%14 May 04	Further Adjustment made to accomodate all the ASN.1 types supported by Protocol Tester
+%24 May 04	Changed imported_or_exported_item to reference in define of imported_or_exported_list
+%29 May 04	Specialized the type of legal element types for the types sequence_of_type and set_of_type 
+%11 Jun 04	Changed size_marker_statement variant for 'ALLIGNED 'ON.  More generically, it only accepts
+%		references as size reference now.
+%14 Jun 04	Removed define constant_expression (is an expression).  Not used
+%16 Jun 04	local_assignment_statement can only take additive_expression on its RValue
+%2  Juil 04	construction_parameters have been generalized to accomodate referenced_element
+%
+%xx Nov 14	Complete redesign based on IDS project.
+
+% Ali ElShakankiry
+% Jun 16 - Jul 17 Multiple additions made to extend SCL to support custom code parser generation
+
+#pragma -width 160 -idchars '-'
+
+compounds
+       ::= ... != == ... <= >=  </ ||
+end compounds
+
+comments
+        -- 
+        --/ /--
+end comments
+ 
+keys
+    'BOOLEAN 'BEGIN 'BIG 'INTEGER 'END 'BIT 'DEFINITIONS 'STRING 'EXPLICIT
+    'OCTET 'NULL 'EXPORTS 'SEQUENCE 'IMPORTS 'OF 'REAL 'SET 'INCLUDES
+    'IMPLICIT 'ANY 'SIZE 'EXTERNAL 'FROM 'OBJECT 'WITH 'IDENTIFIER 'COMPONENT
+    'OPTIONAL 'PRESENT 'DEFAULT 'ABSENT 'COMPONENTS 'DEFINED 'UNIVERSAL 'BY
+    'APPLICATION 'PLUS-INFINITY 'PRIVATE 'MINUS-INFINITY 'TRUE 'TAGS 'FALSE
+    'AUTOMATIC 'EXTENSIBILITY 'IMPLIED 'ENCODED 'CONTAINING 'VisibleString 'UTCTime  
+    'STRING 'GeneralizedTime 'IA5String
+end keys
+
+tokens
+    binnumber "'[01]*'B" %the rules to deal with the right value of range_constraint
+			 %are affected by the name of this non-t.
+
+    %hexnumber "'[abcdefABCDEF\d]*'H" %the rules to deal with the right value of range_constraint
+    hex  "0x[\dABCDEFabcdef]+" %the rules to deal with the right value of range_constraint
+    				     %are affected by the name of this non-t.
+
+    number "\d+"    %the rules to deal with the right value of range_constraint are
+		    %affected by the name of this non-t.
+
+    stringlit "\"[(\\\c)#\"(\"\")]*\"" %the rules to deal with the right value
+				       % of range_constraint are affected by the name of this non-t.
+       
+end tokens
+
+define program
+    [repeat module_definition]
+end define
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%  MODULE DEFINITIONS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+define module_definition
+    [id] 'DEFINITIONS [opt tag_default] ::= 'BEGIN		[NL][IN]
+	[opt module_body]					[NL][EX]
+    'END 							[NL]
+end define
+
+define tag_default
+     'EXPLICIT 'TAGS
+   | 'IMPLICIT 'TAGS
+   | 'AUTOMATIC 'TAGS
+end define
+
+define module_body
+	[opt export_block]
+	[opt import_block]
+	[repeat rule_definition]
+end define
+
+define export_block
+	'EXPORTS [list decl] ';				[NL]
+end define
+
+define import_block
+	'IMPORTS [list import_list+] ';			[NL]
+end define
+
+define import_list
+	[list decl] 'FROM [id]				[NL]
+end define
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% ASN Grammar top level rules 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+define rule_definition
+	[type_rule_definition]
+   |	[value_rule_definition]
+   |	[construction_assignment_statement]
+end define
+
+define type_rule_definition
+	[decl] '::= [type] [opt scl_additions]				 [NL]
+end define
+
+define value_rule_definition
+	[decl] [type] '::= [value]					[NL]
+end define
+
+define value
+	[id] 
+   |	[named_item]
+   |	[number]
+   |	[signed_number]
+   %|	[hexnumber]
+   |	[binnumber]
+   |	'NULL
+   |	[asn_stringlit]
+   |	'{[list elements]'}
+end define
+
+define elements
+	[repeat value]
+end define
+
+define construction_assignment_statement
+	[decl] '::= [type_decision]				[NL]
+end define
+
+define type_decision
+	'( [type_reference] [repeat alternative_decision]')
+end define         
+
+define alternative_decision
+	'| [type_reference] 
+end define
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% ASN type rules
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+define type
+     [builtin_type]
+%  | [id]			% ignore for now.
+   | [size_based_type]
+   | [value_based_type]
+end define
+
+define size_based_type
+   [id] [size_constraint] [opt endian] [opt slack]
+   %[decl] [size_constraint] % If we will be using short names for generating code
+end define
+
+define value_based_type
+    [id] [value_range_constraint]
+    %[decl] [value_range_constraint] % If we will be using short names for generating code
+end define
+
+define builtin_type
+     [boolean_type]
+   | [choice_type]
+   | [integer_type]
+   | [real_type]
+   | [bit_string_type]
+   | [octet_string_type]
+   | [null_type]
+   | [sequence_type]
+   | [sequence_of_type]
+   | [set_type]
+   | [set_of_type]
+   | [tagged_type]
+   | [any_type]
+   | [object_identifier_type]
+   | [UTCTime_type]
+   | [GENTime_type]
+   | [character_string_type]
+end define
+
+define boolean_type
+    'BOOLEAN
+end define
+
+define choice_type
+    'CHOICE '{ [list named_type] '}
+end define
+
+define integer_type
+      'INTEGER [size_constraint] [opt endian]
+%TODO: review range_constraints paradigm
+    | 'INTEGER [value_range_constraint] %SNMP SMIv1
+    | 'INTEGER [parm_values]
+end define
+
+define real_type
+      'REAL [size_constraint] [opt endian]
+end define
+
+define endian
+    'BIGENDIAN
+    | LITTLEENDIAN
+end define
+
+define slack
+    'SLACK
+    | 'SLACKMOD4
+end define
+
+define bit_string_type
+	'BIT 'STRING [size_constraint] [opt parm_values] % need better name for { [list named_item] }
+end define
+
+define parm_values
+    '{ [list named_item] '}
+end define
+
+define octet_string_type
+	'OCTET 'STRING [opt size_constraint] [opt endian] [opt slack]
+end define
+
+define null_type
+    'NULL
+end define
+
+define sequence_type
+    'SEQUENCE  [opt size_constraint] '{		[IN]
+	[list element_type] [opt ',]			[NL][EX]
+
+    '}
+end define
+
+%define sequence_of_type
+%   	'SEQUENCE 'OF [opt size_constraint] [opt 'COMPONENTS ][opt 'OF][seq_set_of_elem_types]
+%end define
+define sequence_of_type
+    'SEQUENCE 'OF [id]
+end define
+
+define set_type
+    'SET  [opt size_constraint]'{			[NL]
+	[list element_type]				[NL]
+    '}
+end define
+
+%define set_of_type
+%	'SET 'OF [opt size_constraint][opt 'COMPONENTS][opt 'OF] [seq_set_of_elem_types]
+%end define
+define set_of_type
+    'SET 'OF [id] [size_constraint]
+end define
+
+define tagged_type
+      [tag] [type]
+   | [opt tag] 'IMPLICIT [type]
+   | [opt tag] 'EXPLICIT [type]
+end define
+
+define tag
+      '[ [opt class] [number] ']
+    | '[ [opt class] [id] ']
+end define
+
+define class
+	'UNIVERSAL 
+   |	'APPLICATION 
+   |	'PRIVATE
+end define
+
+define any_type
+    'ANY [opt defined_by]
+end define
+
+define defined_by
+    'ANY 'DEFINED 'BY [id]
+end define
+
+define object_identifier_type
+    'OBJECT 'IDENTIFIER
+end define
+
+define UTCTime_type
+    'UTCTime	
+end define
+
+define GENTime_type
+    'GeneralizedTime	
+end define
+
+define	character_string_type
+     'VisibleString [size_constraint]
+   | 'IA5String [size_constraint]
+end define
+
+%%%%%%%%%%%%%%%%%%%%%%%%
+%% SCL additions
+%%%%%%%%%%%%%%%%%%%%%%%%
+
+%define scl_rule_addition
+%end define
+
+define scl_additions
+    [opt encoding_grammar_indicator] [opt size_markers_block] [opt transfer_rules_block]
+    [opt constraints_block] 
+end define
+
+define encoding_grammar_indicator
+	'('ENCODED 'BY 'DER ') [NL]
+   |	'('ENCODED 'BY 'CUSTOM ') [NL]
+end define
+
+define value_range_constraint
+	'( [list constr_range_value] ')
+end define
+
+
+
+
+define named_item
+	[id]'([id] ')
+   |	[id]'([number] ')
+   |	[id]'([signed_number]')
+	%no moduleortypeid should be here
+end define
+
+define seq_set_of_elem_types
+	[boolean_type]
+   |	[integer_type]
+   |	[bit_string_type]
+   |	[octet_string_type]
+   |	[object_identifier_type]
+   |	[UTCTime_type]
+   |	[GENTime_type]
+   |	[character_string_type]
+   |	[real_type]
+   |	[any_type]
+   |	[id]
+end define
+
+define element_type
+   [named_type]
+   | [named_type] 'OPTIONAL
+   |	 [named_type] 'DEFAULT [value] 
+   | 	 [id]'COMPONENTS 'OF [id] 
+end define
+
+define named_type
+  [NL]  [decl] [type]
+  %[NL]  [decl] [TAB_45] [type]
+  %[NL]	[id] [TAB_45] [type]
+%|[NL]	[id] 
+end define
+
+
+%define size_constraint
+	%'('SIZE [constr_range_value] [opt 'BYTES]')
+   %|	'('SIZE [constr_range_value] [opt 'BITS]')
+%end define
+
+define size_constraint
+    '( SIZE [size_constr_argument] ')
+end define
+
+define size_constr_argument
+    [constr_range_value] [size_constr_units]
+  | 'DER
+  | 'DEFINED
+  | 'CONSTRAINED
+  | 'NULL [padding_value]
+end define
+
+define padding_value
+   [number]
+end define
+
+define size_constr_units
+   'BYTES | 'BITS
+end define
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%  CONSTRAINT BLOCK DEFINITIONS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+%TODO: review of all below
+define constraints_block
+	'<constraints> [NL][IN]
+	[constr_body] [EX]
+	'</constraints> [NL]
+end define
+define constr_body
+	[repeat constr_statement]
+end define
+define constr_statement
+
+	[range_constraint][NL]
+  |	[ordering_constraint][NL]
+%TODO add other constraint mecanism if necessry
+end define
+define ordering_constraint
+  'ORDER'( [referenced_element] ') '= [ordering_constraint_RSide]
+end define
+define ordering_constraint_RSide
+ [order_direction] [referenced_element]
+  | [order_direction] '( [repeat and_referenced_element+]')
+end define
+define order_direction
+	'ASCENDING 'USING
+  | 'DESCENDING 'USING
+end define
+define and_referenced_element
+	  [referenced_element]
+	| [and_referenced_element] '& [referenced_element]
+end define
+define range_constraint
+	[range_constraint_left_side] [equality_op] [range_constraint_right_side]
+end define
+
+define range_constraint_left_side
+	'VALUE '( [referenced_element] ')
+	| VALUE '( 'CARDINALITY '( [referenced_element] ') ')
+	| VALUE '( 'LENGTH '( [referenced_element] ') ')
+end define
+
+define range_constraint_right_side
+	[opt boundary_inclusion]
+	[value_alternatives]
+	[opt boundary_inclusion]
+%******* add by songtao for state_based protocol *******	
+      | VALUE '( [referenced_element] ')
+      | [ function_call]
+      | 'EXTERNAL '( [id] ')
+end define
+define function_call
+    [function_name] '( [repeat function_args] ')	
+end define
+define function_name
+    [id]  
+end define
+define function_args 
+    [id] 
+   |'VALUE '( [referenced_element] ')
+   |'EXTERNAL '( [id] ')
+end define
+
+ %********************************
+
+define boundary_inclusion
+	'INCLUDED
+  | 'EXCLUDED
+end define
+define value_alternatives
+	[range_constraint_r_side_values] [repeat or_value_alternative]
+|	[discrete_value_interval] [repeat or_value_alternative]
+end define
+define or_value_alternative
+	'| [range_constraint_r_side_values]
+  |	'| [discrete_value_interval]
+end define
+define discrete_value_interval
+	[range_constraint_r_side_values] '.. [range_constraint_r_side_values]
+end define
+define range_constraint_r_side_values
+	 [number] | [signed_number] | PDULENGTH | [stringlit] | [referenced_element] | 'TRUE | 'FALSE 
+	% [hexnumber] |
+end define
+
+define index_referenced_term
+ 	[reference] '. [index_referencing_key]
+end define	
+define index_referencing_key
+	elementAt '( [number] ')
+end define
+define constr_range_value
+	[constr_range_number]
+   |	[lower_end_value] '.. [upper_end_value]
+end define
+define lower_end_value
+
+	[constr_range_number]
+|	[constr_range_number] '<
+end define
+define upper_end_value
+
+	[constr_range_number]
+|	'< [constr_range_number]
+end define
+define constr_range_number
+	[number]
+   |	[signed_number]
+   |	[id]
+   |	[named_item]
+   |	'MIN
+   |    'MAX
+end define
+%%END%%%%%%%%%%%%%%%%%%%%%%%%RANGE CONSTRAINTS EXPRESSION%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%SIZE MARKER BLOCK%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+define size_markers_block
+'<size 'markers> [IN][NL]
+[repeat size_marker_statement][EX]
+'</size 'markers> [NL]
+end define
+
+define size_marker_statement
+	[reference][TAB]'IS [size_expn] [NL]
+|	[reference][TAB]'IS CONSTRAINED [NL]
+|	[reference][TAB]'IS 'SELFDEFINED [NL]
+|	[reference][TAB]'ALLIGNED 'ON [id][NL]
+end define
+
+define size_expn
+	[id][size_unit]
+   |	[number][size_unit]
+end define
+define size_unit
+	'BITS
+   |	'BYTES
+end define
+%%%%%%%%%%%%%%%%%%%%%%%%%end SIZE MARKER BLOCK%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%DECODING TRANSFER RULES BLOCK SYNTAX%%%%%%%%%%%%
+
+define transfer_rules_block
+'<transfer> [IN][NL]
+[transfer_statement_body][EX]
+'</transfer> [NL]
+end define
+
+define transfer_statement_body
+    [repeat transfer_statement]
+end define
+
+define transfer_statement
+     [back_block]					[NL]
+   | [forward_block]					[NL]
+   | 'ALL 'BYTES 'USED					[NL]
+   | 'Callback [NL]
+%	[local_assignment_statement] [NL]
+%  |	[construction_parameters] [NL]
+end define
+
+define back_block
+    'Back '{ [or_expression]'} 
+end define
+
+define forward_block
+    'Forward '{ [or_expression]'} 
+end define
+
+define local_assignment_statement
+	%for legacy purposes, but will be removed eventually
+   	[id] 'INTEGER 'IS [number][size_unit] '= [additive_expression]
+   |
+   	[id]  '= [additive_expression]
+	
+end define
+
+%becomes ambigous with normal type assignment
+
+define components_of
+	'COMPONENTS 'OF
+end define
+
+%modified [expression] became additive_expression
+%[identifier] became referenced_element	
+define construction_parameter
+	CARDINALITY '( [referenced_element] ') = [additive_expression]
+ | 	LENGTH '( [referenced_element] ') = [additive_expression] [opt size_unit]
+
+end define
+
+%%end%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DECODING TRANSFER RULES BLOCK%%%%%%%
+%Expression From the Java.Grm on www.txl.ca%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+define expression
+    [local_assignment_expression]
+end define
+
+define local_assignment_expression
+        [or_expression]
+%    |   [unary_expression] [assignment_operator] [local_assignment_expression]    
+end define
+
+define logical_or_and_expression
+    [SPOFF] '|| [SPON] [or_expression]
+    |  [SPOFF] '&& [SPON] [or_expression]
+end define
+%define assignment_operator
+ %       '== %future use| '*=|'/=|   '%= |   '+= |   '-= |   '<<= |   '>>= |   '>>>= |   '&= |   '^= |   '|=
+%end define
+
+define or_expression
+    %[SPOFF]
+    %[and_expression][repeat or_and_expression]% [SPON]
+    [and_expression][repeat or_and_expression]% [SPON]
+end define
+
+define or_and_expression
+    '|| [and_expression]
+end define
+
+define and_expression
+    [equality_expression][repeat and_equality_expression]
+end define
+
+define and_equality_expression
+    '&& [equality_expression]
+end define
+
+define equality_expression
+%here we only allow one equality_op_relation_expression
+    [relational_expression][opt equality_op_relational_expression] 
+	%[repeat equality_op_relational_expression]
+end define
+
+define equality_op_relational_expression
+    [equality_op][relational_expression]
+end define
+
+define equality_op
+    '== | '!=
+end define
+
+define relational_expression
+    [additive_expression][repeat relational_op_additive_expression]
+end define
+
+define relational_op
+    '<  | '> | '<= | '>=
+end define
+
+define relational_op_additive_expression
+[relational_op][additive_expression]
+end define
+
+define additive_expression
+    [multiplicative_expression][repeat add_op_multiplicative_expression]
+end define
+
+define add_op_multiplicative_expression
+    [add_op][multiplicative_expression]
+end define
+
+define add_op
+    '+ | '- 
+end define
+
+define multiplicative_expression
+    [bit_and_expression][repeat mult_op_bit_and_expression]
+end define
+
+define mult_op_bit_and_expression
+    [mult_op][bit_and_expression]
+end define
+
+define mult_op
+    '* | '/ | '% 
+end define
+
+define bit_and_expression
+    %[unary_expression] [repeat bit_and_unary_expression]
+    [unary_expression] [repeat bit_and_unary_expression]
+end define
+
+define bit_and_unary_expression
+   %[SPOFF] '&& [SPON] [unary_expression]
+   [SPOFF] '& [SPON] [or_expression]
+   | [SPOFF] '| [SPON] [or_expression]
+end define
+
+define unary_expression
+   	[primary]
+   |	[size_of_expn]
+   %|    [add_op][unary_expression] T.D. June 3, 2015
+   
+end define
+
+%TODO: start back here after having defined a 'reference'
+define primary
+
+     'PDULENGTH
+   | 'PDUREMAINING
+   | [value_expression]
+   | [cardinality_expression]
+   | [length_expression]
+   | [endianness_expression]
+   | [exists_expression]
+   | [terminate_expression]
+   | [end_expression]
+   | [global_expression]
+   | [pos_expression]
+   |       [index_referenced_term]
+   |  [referenced_element]
+    |  [number]
+    %|  [hexnumber]
+    |  [hex]
+    | [charlit]
+    |   '( [expression] ') [opt cond_value]
+    |  [DER_field_extension] % field.tag, field.length, field.value
+    
+end define
+
+define cond_value
+    '?  [additive_expression] ': [additive_expression]
+end define
+
+define value_expression
+   'VALUE '( [referenced_element] ')
+end define
+
+define cardinality_expression
+   'CARDINALITY '( [referenced_element] ')
+end define
+
+define length_expression
+   [length_functor] '( [referenced_element] ')
+end define
+
+define length_functor
+    'LENGTH | 'BITLENGTH
+end define
+
+define endianness_expression
+  [endianness_functor] [or_expression]
+end define
+
+define endianness_functor
+  'ENDIANNESS
+end define
+
+define exists_expression
+  'EXISTS '( [referenced_element] ')
+end define
+
+define terminate_expression
+  'TERMINATE '( [referenced_element] ')
+end define
+
+define end_expression
+  'END '( [referenced_element] ')
+end define
+
+define global_expression
+  'GLOBAL '( [referenced_element] ')
+end define
+
+define pos_expression
+  'POS '( [referenced_element] ')
+end define
+
+define size_of_expn
+    'SIZEOF '( [index_referenced_term] ')
+    |  'SIZEOF '( [referenced_element] ')
+
+end define
+
+define DER_field_extension
+	[reference] '. 'tag
+   |	[reference] '. 'length
+   |	[reference] '. 'value
+end define
+
+define referenced_element
+   	[referencable_primaries]
+ %CONSIDER CHANGING THE referenced_element by referenced_primaries
+  |	[referencable_primaries] '. [referenced_element]
+end define
+
+define referencable_primaries
+  		[reference]
+   |	 [index_referenced_term]
+   |	[DER_field_extension]
+  end define
+
+
+%% common defs
+define signed_number
+    [SPOFF] '- [number] [SPON]
+end define
+
+define asn_stringlit
+    [repeat stringlit][NL]
+end define
+
+define reference
+    [id]
+end define
+
+define decl
+    [id] [opt hatID]
+end define
+
+define hatID
+   '^ [id]
+end define
+
+define type_reference
+    [id] [opt dotID]
+end define
+
+define dotID
+   '. [id]
+end define

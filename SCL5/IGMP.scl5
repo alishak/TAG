@@ -1,0 +1,112 @@
+-- BSD 3-Clause License
+-- 
+-- Copyright (c) 2017, Ali ElShakankiry
+-- All rights reserved.
+-- 
+-- Redistribution and use in source and binary forms, with or without
+-- modification, are permitted provided that the following conditions are met:
+-- 
+-- * Redistributions of source code must retain the above copyright notice, this
+--   list of conditions and the following disclaimer.
+-- 
+-- * Redistributions in binary form must reproduce the above copyright notice,
+--   this list of conditions and the following disclaimer in the documentation
+--   and/or other materials provided with the distribution.
+-- 
+-- * Neither the name of the copyright holder nor the names of its
+--   contributors may be used to endorse or promote products derived from
+--   this software without specific prior written permission.
+-- 
+-- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-- AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-- IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-- DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-- FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-- DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-- SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-- CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-- OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-- OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+IGMP DEFINITIONS ::= BEGIN
+
+   EXPORTS PDU;
+   
+PDU ::= ( V3Report | Query | V2Report | V2Leave)
+<transfer>
+   Callback
+</transfer>
+
+Query ::= SEQUENCE {
+   type INTEGER (SIZE 1 BYTES),
+   maxRespTime INTEGER (SIZE 1 BYTES),
+   checksum INTEGER (SIZE 2 BYTES),
+   groupAddr INTEGER (SIZE 4 BYTES),
+   -- v3Add     set of V3Addition (SIZE DEFINED) -- really need opt (0 or 1)
+   v3Add V3Addition (SIZE DEFINED) OPTIONAL
+}
+<transfer>
+   Back{type == 17} -- 0x11
+   Forward { EXISTS(v3Add) == PDUREMAINING }
+</transfer>
+
+
+V3Addition ::= SEQUENCE {
+   resvSQRV INTEGER (SIZE 1 BYTES),
+   QQIC INTEGER (SIZE 1 BYTES),
+   numSources INTEGER (SIZE 2 BYTES),
+   srcAddrs SET OF SOURCEADDRESS (SIZE CONSTRAINED)
+} (ENCODED BY CUSTOM)
+<transfer>
+   Forward{CARDINALITY(srcAddrs)  == numSources}
+</transfer>
+
+V2Report ::= SEQUENCE {
+   type INTEGER (SIZE 1 BYTES),
+   maxRespTime INTEGER (SIZE 1 BYTES),
+   checksum INTEGER (SIZE 2 BYTES),
+   groupAddr INTEGER (SIZE 4 BYTES)
+} (ENCODED BY CUSTOM)
+<transfer>
+   Back{type == 22} -- 0x16
+</transfer>
+
+V2Leave ::= SEQUENCE {
+   type INTEGER (SIZE 1 BYTES),
+   maxRespTime INTEGER (SIZE 1 BYTES),
+   checksum INTEGER (SIZE 2 BYTES),
+   groupAddr INTEGER (SIZE 4 BYTES)
+} (ENCODED BY CUSTOM)
+<transfer>
+   Back{type == 23} -- 0x17
+</transfer>
+
+V3Report ::= SEQUENCE {
+   type INTEGER (SIZE 1 BYTES),
+   reserved INTEGER (SIZE 1 BYTES),
+   checksum INTEGER (SIZE 2 BYTES),
+   secondReserved INTEGER (SIZE 2 BYTES),
+   numGrps INTEGER (SIZE 2 BYTES),
+   groupRecordInfo SET OF GROUPRECORD (SIZE CONSTRAINED)
+} (ENCODED BY CUSTOM)
+<transfer>
+   Back{type == 34} -- 0x22
+   -- Forward{LENGTH(groupRecordInfo)  == (PDULENGTH - (SIZEOF(type) + SIZEOF(reserved) + SIZEOF(checksum) + SIZEOF(secondReserved) + SIZEOF(numGrps)))} -- This really should be a cardinality constraint on numGrps
+   Forward{CARDINALITY(groupRecordInfo) == numGrps}
+</transfer>
+
+GROUPRECORD ::= SEQUENCE {
+   recordType INTEGER (SIZE 1 BYTES),
+   auxDataLen INTEGER (SIZE 1 BYTES),
+   numSources INTEGER (SIZE 2 BYTES),
+   groupAddr INTEGER (SIZE 4 BYTES),
+   srcAddrs SET OF SOURCEADDRESS (SIZE CONSTRAINED)
+} (ENCODED BY CUSTOM)
+<transfer>
+   Forward{CARDINALITY(srcAddrs) == numSources}
+</transfer>
+
+SOURCEADDRESS ::= SEQUENCE {
+  srcAddr INTEGER (SIZE 4 BYTES)
+} (ENCODED BY CUSTOM)
+END
